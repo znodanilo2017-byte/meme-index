@@ -1,3 +1,13 @@
+# --For main.py--
 requests
 numpy==1.26.4
 boto3
+
+# --For app.py--
+streamlit
+pandas
+boto3
+plotly
+pyarrow
+fastparquet
+plotly
