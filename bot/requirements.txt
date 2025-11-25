@@ -1,0 +1,8 @@
+# --For main.py--
+requests
+numpy==2.2.2
+pandas==2.2.3
+boto3
+websocket-client
+pyarrow
+fastparquet
