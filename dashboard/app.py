@@ -23,32 +23,49 @@ else:
 
 @st.cache_data(ttl=60) # Cache data for 60 seconds to save S3 costs/speed
 def load_data():
-    """Fetches only TODAY'S parquet files from S3."""
-    # 1. Get today's date string (e.g., "btc_trades_20251125")
-    today_prefix = f"btc_trades_{datetime.datetime.now().strftime('%Y%m%d')}"
+    """Fetches data for Today AND Yesterday using Pagination (Fixes 1000 file limit)."""
     
-    # 2. Ask S3 only for files starting with today's date
-    objects = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=today_prefix)
+    # 1. Calculate Date Prefixes (Today and Yesterday)
+    # This prevents us from scanning the whole bucket (40MB+), saving cost/time.
+    today = datetime.datetime.now()
+    yesterday = today - datetime.timedelta(days=1)
     
-    if 'Contents' not in objects:
-        st.warning(f"No data found for today ({today_prefix}).")
+    prefixes = [
+        f"btc_trades_{today.strftime('%Y%m%d')}",      # e.g., btc_trades_20251125
+        f"btc_trades_{yesterday.strftime('%Y%m%d')}"   # e.g., btc_trades_20251124
+    ]
+    
+    all_files = []
+    paginator = s3.get_paginator('list_objects_v2')
+
+    # 2. Fetch ALL files for these days (Paginator handles the >1000 limit)
+    for prefix in prefixes:
+        for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=prefix):
+            if 'Contents' in page:
+                all_files.extend(page['Contents'])
+
+    if not all_files:
         return pd.DataFrame()
-        
-    # 3. Sort by last modified and take the last 10 chunks
-    files = sorted(objects['Contents'], key=lambda x: x['LastModified'], reverse=True)[:10]
+
+    # 3. Sort by time and take the last 200 files (To keep the dashboard fast)
+    # We don't need to download 3,000 files to show a "Real-time" chart.
+    recent_files = sorted(all_files, key=lambda x: x['LastModified'], reverse=True)[:200]
     
-    all_data = []
-    
-    for file in files:
-        obj = s3.get_object(Bucket=BUCKET_NAME, Key=file['Key'])
-        df = pd.read_parquet(BytesIO(obj['Body'].read()))
-        all_data.append(df)
-        
-    if not all_data:
+    # 4. Download actual data
+    data_frames = []
+    for file in recent_files:
+        try:
+            obj = s3.get_object(Bucket=BUCKET_NAME, Key=file['Key'])
+            df = pd.read_parquet(BytesIO(obj['Body'].read()))
+            data_frames.append(df)
+        except Exception as e:
+            print(f"Error reading {file['Key']}: {e}")
+
+    if not data_frames:
         return pd.DataFrame()
-        
-    # 4. Merge and Sort
-    final_df = pd.concat(all_data)
+
+    # 5. Merge
+    final_df = pd.concat(data_frames)
     final_df['time'] = pd.to_datetime(final_df['time'])
     final_df = final_df.sort_values(by='time')
     

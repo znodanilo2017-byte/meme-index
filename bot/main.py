@@ -31,7 +31,7 @@ s3_client = boto3.client('s3')
 def send_telegram_alert(trade):
     """Sends a message to your phone"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    side = "jq BUY" if trade['buyer_maker'] == False else "🔴 SELL"
+    side = "🟢 BUY" if trade['buyer_maker'] == False else "🔴 SELL"
     message = (
         f"🚨 <b>WHALE ALERT</b> 🚨\n\n"
         f"{side} <b>{trade['quantity']:.4f} BTC</b>\n"
