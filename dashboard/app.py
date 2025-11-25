@@ -3,6 +3,7 @@ import pandas as pd
 import boto3
 import plotly.express as px
 from io import BytesIO
+import datetime
 
 # --- CONFIG ---
 BUCKET_NAME = "crypto-lake-taras-2025-november" # <--- YOUR BUCKET NAME
@@ -22,19 +23,22 @@ else:
 
 @st.cache_data(ttl=60) # Cache data for 60 seconds to save S3 costs/speed
 def load_data():
-    """Fetches the last 5 parquet files from S3 and merges them."""
-    # 1. List files in bucket
-    objects = s3.list_objects_v2(Bucket=BUCKET_NAME)
+    """Fetches only TODAY'S parquet files from S3."""
+    # 1. Get today's date string (e.g., "btc_trades_20251125")
+    today_prefix = f"btc_trades_{datetime.datetime.now().strftime('%Y%m%d')}"
+    
+    # 2. Ask S3 only for files starting with today's date
+    objects = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=today_prefix)
     
     if 'Contents' not in objects:
+        st.warning(f"No data found for today ({today_prefix}).")
         return pd.DataFrame()
         
-    # 2. Sort by date and take the last 5 (Most recent data)
-    files = sorted(objects['Contents'], key=lambda x: x['LastModified'], reverse=True)[:5]
+    # 3. Sort by last modified and take the last 10 chunks
+    files = sorted(objects['Contents'], key=lambda x: x['LastModified'], reverse=True)[:10]
     
     all_data = []
     
-    # 3. Download and read each file
     for file in files:
         obj = s3.get_object(Bucket=BUCKET_NAME, Key=file['Key'])
         df = pd.read_parquet(BytesIO(obj['Body'].read()))
@@ -43,7 +47,12 @@ def load_data():
     if not all_data:
         return pd.DataFrame()
         
-    return pd.concat(all_data)
+    # 4. Merge and Sort
+    final_df = pd.concat(all_data)
+    final_df['time'] = pd.to_datetime(final_df['time'])
+    final_df = final_df.sort_values(by='time')
+    
+    return final_df
 
 # --- THE UI ---
 st.title("🐋 Real-Time Whale Tracker")
@@ -69,7 +78,7 @@ if not df.empty:
     # --- CHART 1: Price History ---
     st.subheader("Bitcoin Price Action")
     fig_price = px.line(df, x='time', y='price', title='BTC/USDT Real-Time Feed')
-    st.plotly_chart(fig_price, use_container_width=True)
+    st.plotly_chart(fig_price, width='stretch')
 
     # --- CHART 2: Whale Detector (Scatter Plot) ---
     st.subheader("Whale Volume Detection")
